@@ -1,4 +1,4 @@
-use super::{super::SimpleString, preludes::*};
+use super::{SimpleString, preludes::*};
 pub const CRLF: &[u8] = b"\r\n";
 pub const CRLF_LEN: usize = CRLF.len();
 use bytes::Bytes;
