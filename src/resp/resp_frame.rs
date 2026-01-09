@@ -85,6 +85,7 @@ impl RespDecode for RespFrame {
                 let frame = RespNull::decode(buf)?;
                 Ok(frame.into())
             }
+            None => Err(RespError::NotComplete),
             _ => Err(RespError::InvalidFrameType(format!(
                 "RespFrame expect: +, -, :, $, *, #, ,, %, ~, _, but got {:?}",
                 buf

@@ -1,12 +1,12 @@
 mod hmap;
 mod map;
-use std::sync::LazyLock;
+use std::{convert::TryFrom, sync::LazyLock};
 
 use thiserror::Error;
 
 use crate::{
     backend::Backend,
-    resp::{BulkString, RespArray, RespError, RespFrame, SimpleString},
+    resp::{BulkString, RespArray, RespError, RespFrame, SimpleError, SimpleString},
 };
 
 pub static RESP_OK: LazyLock<RespFrame> =
@@ -29,12 +29,37 @@ pub enum CommandError {
 pub trait CommandExecutor {
     fn execute(self, backend: &Backend) -> RespFrame;
 }
+#[derive(Debug)]
 pub enum Command {
     Ping,
     Set(CommandSet),
     Get(CommandGet),
     HGet(CommandHGet),
-    HGetAll,
+    HSet(CommandHSet),
+    HGetAll(CommandHGetAll),
+    Unrecognized(Unrecognized),
+}
+#[derive(Debug)]
+pub struct Unrecognized {
+    command: String,
+}
+impl CommandExecutor for Unrecognized {
+    fn execute(self, _backend: &Backend) -> RespFrame {
+        SimpleError::new(format!("unrecognized command: {}", self.command)).into()
+    }
+}
+impl CommandExecutor for Command {
+    fn execute(self, backend: &Backend) -> RespFrame {
+        match self {
+            Command::Ping => RespFrame::SimpleString(SimpleString::from("PONG")),
+            Command::Set(cmd) => cmd.execute(backend),
+            Command::Get(cmd) => cmd.execute(backend),
+            Command::HGet(cmd) => cmd.execute(backend),
+            Command::HSet(cmd) => cmd.execute(backend),
+            Command::HGetAll(cmd) => cmd.execute(backend),
+            Command::Unrecognized(unrecognized) => unrecognized.execute(backend),
+        }
+    }
 }
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -66,6 +91,7 @@ pub struct CommandHSet {
     field: String,
     value: RespFrame,
 }
+
 pub fn valid_command<'a>(
     value: &'a RespArray,
     name_slice: &[&'static str],
@@ -113,5 +139,49 @@ pub fn valid_command<'a>(
             name_slice.join(" "),
             n_args
         )))
+    }
+}
+
+impl TryFrom<RespFrame> for Command {
+    type Error = CommandError;
+    fn try_from(v: RespFrame) -> Result<Self, Self::Error> {
+        match v {
+            RespFrame::Array(resp_array) => resp_array.try_into(),
+            _ => Err(CommandError::InvalidCommand(
+                "invalid command array".to_string(),
+            )),
+        }
+    }
+}
+
+impl TryFrom<RespArray> for Command {
+    type Error = CommandError;
+    fn try_from(v: RespArray) -> Result<Self, Self::Error> {
+        match v {
+            RespArray {
+                elements: Some(ref elements),
+            } => match elements.first() {
+                Some(RespFrame::BulkString(BulkString {
+                    content: Some(bytes),
+                })) => match bytes.as_slice() {
+                    b"ping" => Ok(Command::Ping),
+                    b"set" => CommandSet::try_from(v).map(Command::Set),
+                    b"get" => CommandGet::try_from(v).map(Command::Get),
+                    b"hget" => CommandHGet::try_from(v).map(Command::HGet),
+                    b"hset" => CommandHSet::try_from(v).map(Command::HSet),
+                    b"hgetall" => CommandHGetAll::try_from(v).map(Command::HGetAll),
+                    _ => Ok(Command::Unrecognized(Unrecognized {
+                        command: String::from_utf8_lossy(bytes).to_string(),
+                    })),
+                },
+                _ => Err(CommandError::InvalidCommand(format!(
+                    "unknown command: {:?}",
+                    elements.first()
+                ))),
+            },
+            _ => Err(CommandError::InvalidCommand(
+                "empty command array".to_string(),
+            )),
+        }
     }
 }

@@ -16,9 +16,9 @@ impl BulkString {
         Self { content: None }
     }
 
-    pub fn from_string(content: &[u8]) -> Self {
+    pub fn from_slice(content: impl Into<Vec<u8>>) -> Self {
         Self {
-            content: Some(content.to_vec()),
+            content: Some(content.into()),
         }
     }
 }
@@ -112,7 +112,7 @@ mod tests {
     use super::{super::*, *};
     #[test]
     fn test_bulk_string_encode() {
-        let bulk_string = BulkString::from_string(b"hello");
+        let bulk_string = BulkString::from_slice(b"hello");
         let frame: RespFrame = bulk_string.into();
         let encoded = frame.encode();
         assert_eq!(encoded, b"$5\r\nhello\r\n");
@@ -127,7 +127,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"$5\r\nhello\r\n".as_ref());
         let bulk_string = BulkString::decode(&mut buf).unwrap();
-        assert_eq!(bulk_string, BulkString::from_string(b"hello"));
+        assert_eq!(bulk_string, BulkString::from_slice(b"hello"));
     }
     #[test]
     fn test_null_bulk_string_decode() {
